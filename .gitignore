@@ -1,0 +1,8 @@
+.DS_Store
+.idea
+datasets
+IDID
+InsPLAD
+runs
+know-dist
+optuna_yolo11
