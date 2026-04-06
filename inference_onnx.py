@@ -105,11 +105,21 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
     return boxes_xyxy, scores, class_ids
 
 if __name__ == "__main__":
+    ort.set_default_logger_severity(3) # Only show errors, hide warnings
+
     model_path = "optimised_yolo11/final_training_run/weights/best.onnx"
     video_path = "footage1_aigen.mp4"
     
     print(f"Loading ONNX model: {model_path}")
-    session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+
+    # Create SessionOptions
+    sess_options = ort.SessionOptions()
+    sess_options.enable_profiling = True # Turn on the profiler
+    # Explicitly set the number of threads (e.g., to 4 or 6 depending on your Orin NX model)
+    sess_options.intra_op_num_threads = 4
+    sess_options.inter_op_num_threads = 4
+
+    session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider', 'TensorRTExecutionProvider', 'CPUExecutionProvider'], sess_options=sess_options)
     
     model_inputs = session.get_inputs()
     input_name = model_inputs[0].name
