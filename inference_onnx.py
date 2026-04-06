@@ -119,7 +119,7 @@ if __name__ == "__main__":
     sess_options.intra_op_num_threads = 4
     sess_options.inter_op_num_threads = 4
 
-    session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider', 'TensorRTExecutionProvider', 'CPUExecutionProvider'], sess_options=sess_options)
+    session = ort.InferenceSession(model_path, providers=['CUDAExecutionProvider', 'TensorrtExecutionProvider', 'CPUExecutionProvider'], sess_options=sess_options)
     
     model_inputs = session.get_inputs()
     input_name = model_inputs[0].name
