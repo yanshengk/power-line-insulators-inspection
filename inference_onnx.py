@@ -119,7 +119,16 @@ if __name__ == "__main__":
     sess_options.intra_op_num_threads = 4
     sess_options.inter_op_num_threads = 4
 
-    session = ort.InferenceSession(model_path, providers=['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider'], sess_options=sess_options)
+    session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
+        ('TensorrtExecutionProvider', {
+            'device_id': 0, 
+            'trt_fp16_enable': True, 
+            'trt_engine_cache_enable': True, 
+            'trt_engine_cache_path': './trt_cache'
+        }), 
+        ('CUDAExecutionProvider', {}),
+        ('CPUExecutionProvider', {})
+    ])
     
     model_inputs = session.get_inputs()
     input_name = model_inputs[0].name
