@@ -114,17 +114,19 @@ if __name__ == "__main__":
 
     # Create SessionOptions
     sess_options = ort.SessionOptions()
-    sess_options.enable_profiling = True # Turn on the profiler
+    # sess_options.enable_profiling = True # Turn on the profiler
     # Explicitly set the number of threads (e.g., to 4 or 6 depending on your Orin NX model)
-    sess_options.intra_op_num_threads = 4
-    sess_options.inter_op_num_threads = 4
+    sess_options.intra_op_num_threads = 8
+    sess_options.inter_op_num_threads = 8
 
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
         ('TensorrtExecutionProvider', {
             'device_id': 0, 
             'trt_fp16_enable': True, 
             'trt_engine_cache_enable': True, 
-            'trt_engine_cache_path': './trt_cache'
+            'trt_engine_cache_path': './trt_engines',
+            'trt_dump_ep_context_model': True,
+            'trt_ep_context_file_path': './optimised_yolo11/final_training_run/weights'
         }), 
         ('CUDAExecutionProvider', {}),
         ('CPUExecutionProvider', {})

@@ -154,7 +154,8 @@ def main():
     in2_name, in2_h, in2_w, in2_type = get_input_info(sess2)
     out2_name = get_output_name(sess2)
     
-    names = {0: 'insulator string', 1: 'flashed', 2: 'broken'}
+    names1 = {0: 'insulator string'}
+    names2 = {0: 'flashed', 1: 'broken'}
     entropy_threshold = 0.3
     
     source_path = 'footage1_aigen.mp4'
@@ -192,7 +193,7 @@ def main():
             crop = frame[y1:y2, x1:x2]
             
             # Draw insulator
-            cls1_name = names.get(cls1_id, str(cls1_id))
+            cls1_name = names1.get(cls1_id, str(cls1_id))
             entropy = calculate_shannon_entropy(conf1)
             
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -223,7 +224,7 @@ def main():
                     abs_y2 = y1 + cy2
                     
                     cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
-                    cls2_name = names.get(cls2_id, str(cls2_id))
+                    cls2_name = names2.get(cls2_id, str(cls2_id))
                     cv2.putText(frame, f"{cls2_name} {conf2:.2f}", (abs_x1, max(10, abs_y1 - 10)), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
