@@ -31,7 +31,7 @@ def run_predict(model_path, source_path, show_results=False, delay=3000):
             if show_results:
                 img = r.plot(line_width=3)
                 h, w = img.shape[:2]
-                target_w = 1920
+                target_w = 1280
                 if w > 0:
                     scale = target_w / float(w)
                     img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
@@ -68,9 +68,9 @@ def run_predict(model_path, source_path, show_results=False, delay=3000):
         else:
             print("[!] No result")
 
-        # # If you only want a fixed delay for still images, do it here.
-        # if show_results and delay and delay > 0:
-        #     cv2.waitKey(delay)
+        # If you only want a fixed delay for still images, do it here.
+        if show_results and delay and delay > 0:
+            cv2.waitKey(delay)
 
     finally:
         if show_results:
@@ -79,9 +79,10 @@ def run_predict(model_path, source_path, show_results=False, delay=3000):
 
 if __name__ == "__main__":
     models = [
-        "optimised_yolo11/final_training_run/weights/best.onnx"
+        "optimised_yolo11/final_training_run/weights/best.pt"
     ]
     source = "footage1_aigen.mp4"
+    # source = "datasets/idid-v3/images/test/170797.JPG"
 
     for model in models:
         print(f"\n[/] Running inference using model: {model}")
@@ -90,5 +91,6 @@ if __name__ == "__main__":
         run_predict(
             model_path=model,
             source_path=source,
-            show_results=False,
+            show_results=True,
+            delay=0
         )
