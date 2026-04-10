@@ -6,3 +6,11 @@ InsPLAD
 runs
 know-dist
 optuna_yolo11
+optuna_dinov3_yolo11
+yolo11n.pt
+yolo11s.pt
+yolo26n.pt
+hbb2obb
+__pycache__
+optimised_yolo11
+optimised_dinov3_yolo11
