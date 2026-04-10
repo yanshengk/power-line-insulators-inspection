@@ -190,7 +190,7 @@ if __name__ == "__main__":
         fps = frame_count / elapsed_time
         cv2.putText(orig_img, f"FPS: {fps:.2f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         
-        target_w = 1920
+        target_w = 1280
         h, w = orig_img.shape[:2]
         if w > 0:
             scale = target_w / float(w)
