@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import math
 from ultralytics import YOLO
 
 def main():
@@ -64,7 +65,14 @@ def main():
     cv2.destroyAllWindows()
 
 
-def process_frame(frame, model1, model2):
+def calculate_shannon_entropy(probability):
+    """Calculates binary Shannon entropy for a given probability."""
+    # Clamp probability to avoid math domain error with log2(0)
+    p = max(min(probability, 1.0 - 1e-7), 1e-7)
+    entropy = - (p * math.log2(p) + (1 - p) * math.log2(1 - p))
+    return entropy
+
+def process_frame(frame, model1, model2, entropy_threshold=0.3):
     # 2. Run model 1 to detect insulators
     results1 = model1(frame, verbose=False)
     
@@ -90,33 +98,47 @@ def process_frame(frame, model1, model2):
                 # Draw insulator box (Green)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 conf1 = box.conf[0].item()
-                cls1_name = model1.names[int(box.cls[0].item())]
-                cv2.putText(frame, f"{cls1_name} {conf1:.2f}", (x1, max(10, y1 - 10)), 
+                cls1_id = int(box.cls[0].item())
+                cls1_name = model1.names[cls1_id]
+                
+                # Calculate Shannon Entropy of the detection
+                entropy = calculate_shannon_entropy(conf1)
+                
+                # Show label with entropy
+                label_text = f"{cls1_name} {conf1:.2f} (H:{entropy:.2f})"
+                cv2.putText(frame, label_text, (x1, max(10, y1 - 10)), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
-                # 3. Pass cropped image to model 2 to detect flashed/broken classes
-                results2 = model2(crop, verbose=False)
+                # Uncertainty Gating
+                # If it's classified as normal (0) AND entropy is low (confidence is high), skip stage 2
+                needs_stage_2 = True
+                if cls1_id == 0 and entropy < entropy_threshold:
+                    needs_stage_2 = False
                 
-                for r2 in results2:
-                    d_boxes = r2.boxes
-                    if d_boxes:
-                        for d_box in d_boxes:
-                            # Get cropped relative coordinates
-                            cx1, cy1, cx2, cy2 = map(int, d_box.xyxy[0].tolist())
-                            
-                            # Convert to absolute bounding boxes on the original frame
-                            abs_x1 = x1 + cx1
-                            abs_y1 = y1 + cy1
-                            abs_x2 = x1 + cx2
-                            abs_y2 = y1 + cy2
-                            
-                            # Draw defect box (Red)
-                            cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
-                            conf2 = d_box.conf[0].item()
-                            cls2_name = model2.names[int(d_box.cls[0].item())]
-                            cv2.putText(frame, f"{cls2_name} {conf2:.2f}", (abs_x1, max(10, abs_y1 - 10)), 
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                                        
+                if needs_stage_2:
+                    # 3. Pass cropped image to model 2 to detect flashed/broken classes
+                    results2 = model2(crop, verbose=False)
+                    
+                    for r2 in results2:
+                        d_boxes = r2.boxes
+                        if d_boxes:
+                            for d_box in d_boxes:
+                                # Get cropped relative coordinates
+                                cx1, cy1, cx2, cy2 = map(int, d_box.xyxy[0].tolist())
+                                
+                                # Convert to absolute bounding boxes on the original frame
+                                abs_x1 = x1 + cx1
+                                abs_y1 = y1 + cy1
+                                abs_x2 = x1 + cx2
+                                abs_y2 = y1 + cy2
+                                
+                                # Draw defect box (Red)
+                                cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
+                                conf2 = d_box.conf[0].item()
+                                cls2_name = model2.names[int(d_box.cls[0].item())]
+                                cv2.putText(frame, f"{cls2_name} {conf2:.2f}", (abs_x1, max(10, abs_y1 - 10)), 
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                                            
     return frame
 
 def process_and_show_frame(frame, model1, model2):
