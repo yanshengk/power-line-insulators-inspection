@@ -141,8 +141,8 @@ def preprocess(frame, input_height, input_width, input_type):
 def main():
     ort.set_default_logger_severity(3)
     
-    model1_path = "runs/detect/train16/weights/train16_best.onnx"
-    model2_path = "runs/detect/train17/weights/train17_best.onnx"
+    model1_path = "runs/detect/train16/weights/train16_best_int8.onnx"
+    model2_path = "runs/detect/train17/weights/train17_best_int8.onnx"
     
     print(f"Loading Session 1: {model1_path}")
     sess1 = load_session(model1_path)
