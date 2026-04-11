@@ -107,7 +107,7 @@ def load_session(model_path):
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
         ('TensorrtExecutionProvider', {
             'device_id': 0, 
-            'trt_int8_enable': True, 
+            'trt_fp16_enable': True, 
             'trt_engine_cache_enable': True, 
             'trt_engine_cache_path': './trt_engines',
             'trt_dump_ep_context_model': True,
@@ -141,8 +141,8 @@ def preprocess(frame, input_height, input_width, input_type):
 def main():
     ort.set_default_logger_severity(3)
     
-    model1_path = "runs/detect/train16/weights/train16_best_int8.onnx"
-    model2_path = "runs/detect/train17/weights/train17_best_int8.onnx"
+    model1_path = "runs/detect/train16/weights/train16_best.onnx"
+    model2_path = "runs/detect/train17/weights/train17_best.onnx"
     
     print(f"Loading Session 1: {model1_path}")
     sess1 = load_session(model1_path)
