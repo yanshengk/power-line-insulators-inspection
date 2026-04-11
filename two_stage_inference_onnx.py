@@ -107,7 +107,7 @@ def load_session(model_path):
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
         ('TensorrtExecutionProvider', {
             'device_id': 0, 
-            'trt_fp16_enable': True, 
+            'trt_int8_enable': True, 
             'trt_engine_cache_enable': True, 
             'trt_engine_cache_path': './trt_engines',
             'trt_dump_ep_context_model': True,
