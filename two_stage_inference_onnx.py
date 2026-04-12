@@ -36,8 +36,34 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=False, scal
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
     return img, ratio, (dw, dh)
 
+def compute_iou(box, boxes):
+    x1 = np.maximum(box[0], boxes[:, 0])
+    y1 = np.maximum(box[1], boxes[:, 1])
+    x2 = np.minimum(box[2], boxes[:, 2])
+    y2 = np.minimum(box[3], boxes[:, 3])
+    
+    intersection_area = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+    box_area = (box[2] - box[0]) * (box[3] - box[1])
+    boxes_area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    union_area = box_area + boxes_area - intersection_area
+    
+    return intersection_area / np.maximum(union_area, 1e-6)
+
+def nms(boxes, scores, iou_threshold):
+    sorted_indices = np.argsort(scores)[::-1]
+    keep_boxes = []
+    while sorted_indices.size > 0:
+        box_id = sorted_indices[0]
+        keep_boxes.append(box_id)
+        
+        ious = compute_iou(boxes[box_id, :], boxes[sorted_indices[1:], :])
+        keep_indices = np.where(ious < iou_threshold)[0]
+        sorted_indices = sorted_indices[keep_indices + 1]
+    return keep_boxes
+
 def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
-    predictions = np.squeeze(output[0], axis=0).T 
+    predictions = np.squeeze(output[0], axis=0) # [num_classes + 4, num_anchors]
+    predictions = predictions.T # [num_anchors, num_classes + 4]
     
     boxes = predictions[:, :4]
     scores = np.max(predictions[:, 4:], axis=1)
@@ -51,34 +77,15 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
     if len(boxes) == 0:
         return [], [], []
     
-    # Convert from cx, cy, w, h to x, y, w, h for OpenCV
-    boxes_xywh = np.empty_like(boxes)
-    boxes_xywh[:, 0] = boxes[:, 0] - boxes[:, 2] / 2  # top left x
-    boxes_xywh[:, 1] = boxes[:, 1] - boxes[:, 3] / 2  # top left y
-    boxes_xywh[:, 2] = boxes[:, 2]                    # width
-    boxes_xywh[:, 3] = boxes[:, 3]                    # height
+    boxes_xyxy = np.empty_like(boxes)
+    boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
+    boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
+    boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
+    boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
     
-    # Use OpenCV's highly optimised NMS
-    keep_indices = cv2.dnn.NMSBoxes(
-        bboxes=boxes_xywh.tolist(), 
-        scores=scores.tolist(), 
-        score_threshold=conf_thres, 
-        nms_threshold=iou_thres
-    )
+    keep_indices = nms(boxes_xyxy, scores, iou_thres)
     
-    # Flatten indices in case OpenCV returns a 2D array
-    if len(keep_indices) > 0:
-        keep_indices = np.array(keep_indices).flatten()
-    else:
-        return [], [], []
-
-    # Convert back to xyxy for the rest of your script
-    boxes_xyxy = np.empty_like(boxes[keep_indices])
-    boxes_xyxy[:, 0] = boxes_xywh[keep_indices, 0]
-    boxes_xyxy[:, 1] = boxes_xywh[keep_indices, 1]
-    boxes_xyxy[:, 2] = boxes_xywh[keep_indices, 0] + boxes_xywh[keep_indices, 2]
-    boxes_xyxy[:, 3] = boxes_xywh[keep_indices, 1] + boxes_xywh[keep_indices, 3]
-    
+    boxes_xyxy = boxes_xyxy[keep_indices]
     scores = scores[keep_indices]
     class_ids = class_ids[keep_indices]
     
