@@ -104,21 +104,10 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
     
     return boxes_xyxy, scores, class_ids
 
-if __name__ == "__main__":
-    ort.set_default_logger_severity(3) # Only show errors, hide warnings
-
-    model_path = "optimised_yolo11/final_training_run/weights/best.onnx"
-    video_path = "footage1_aigen.mp4"
-    
-    print(f"Loading ONNX model: {model_path}")
-
-    # Create SessionOptions
+def load_session(model_path, trt_ep_context_file_path='./trt_engines'):
     sess_options = ort.SessionOptions()
-    # sess_options.enable_profiling = True # Turn on the profiler
-    # Explicitly set the number of threads (e.g., to 4 or 6 depending on your Orin NX model)
     sess_options.intra_op_num_threads = 8
     sess_options.inter_op_num_threads = 8
-
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
         ('TensorrtExecutionProvider', {
             'device_id': 0, 
@@ -126,77 +115,98 @@ if __name__ == "__main__":
             'trt_engine_cache_enable': True, 
             'trt_engine_cache_path': './trt_engines',
             'trt_dump_ep_context_model': True,
-            'trt_ep_context_file_path': './optimised_yolo11/final_training_run/weights'
+            'trt_ep_context_file_path': trt_ep_context_file_path
         }), 
         ('CUDAExecutionProvider', {}),
         ('CPUExecutionProvider', {})
     ])
+    return session
+
+def get_input_info(session, default_h=640, default_w=640):
+    inputs = session.get_inputs()
+    shape = inputs[0].shape
+    h, w = shape[2], shape[3]
+    if isinstance(h, str) or h is None:
+        h, w = default_h, default_w
+    return inputs[0].name, h, w, inputs[0].type
+
+def get_output_name(session):
+    return session.get_outputs()[0].name
+
+def preprocess(frame, input_height, input_width, input_type):
+    img, ratio, pad = letterbox(frame, new_shape=(input_height, input_width))
+    img = img[:, :, ::-1].transpose(2, 0, 1)
+    img = np.ascontiguousarray(img)
+    dtype = np.float16 if '16' in str(input_type) else np.float32
+    img = img.astype(dtype) / 255.0
+    img = np.expand_dims(img, axis=0)
+    return img, ratio, pad
+
+def main():
+    ort.set_default_logger_severity(3) # Only show errors, hide warnings
+
+    model_path = "optimised_yolo11/final_training_run/weights/best.onnx"
+    video_path = "footage1_aigen.mp4"
     
-    model_inputs = session.get_inputs()
-    input_name = model_inputs[0].name
-    input_shape = model_inputs[0].shape
-    input_height, input_width = 1280, 1280
-        
-    model_outputs = session.get_outputs()
-    output_name = model_outputs[0].name
+    print(f"Loading Session: {model_path}")
+    sess = load_session(model_path, trt_ep_context_file_path='./optimised_yolo11/final_training_run/weights')
+    in_name, in_h, in_w, in_type = get_input_info(sess, default_h=1280, default_w=1280)
+    out_name = get_output_name(sess)
     
-    print(f"Model Input: {input_name} {input_shape}")
-    print(f"Model Output: {output_name}")
-    
+    print(f"Opening source: {video_path}")
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error opening video: {video_path}")
-        exit()
+        print(f"Error opening source: {video_path}")
+        return
         
+    target_w = 1280
     frame_count = 0
-    start_time = time.time()
+    start_total_time = time.time()
     
     while cap.isOpened():
+        start_time = time.time()
         ret, frame = cap.read()
         if not ret:
             break
             
-        orig_img = frame.copy()
-        
-        # Preprocess
-        img, ratio, pad = letterbox(frame, new_shape=(input_height, input_width))
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3xHxW
-        img = np.ascontiguousarray(img)
-        img = img.astype(np.float32) / 255.0
-        img = np.expand_dims(img, axis=0)
-        
         # Inference
-        outputs = session.run([output_name], {input_name: img})
+        img, ratio, pad = preprocess(frame, in_h, in_w, in_type)
+        outputs = sess.run([out_name], {in_name: img})
         
         # Postprocess
         boxes, scores, class_ids = postprocess(outputs, ratio, pad, conf_thres=0.3, iou_thres=0.45)
         
         # Draw bounding boxes
-        for i, box in enumerate(boxes):
-            xmin, ymin, xmax, ymax = map(int, box)
+        for i in range(len(boxes)):
+            xmin, ymin, xmax, ymax = map(int, boxes[i])
             class_id = class_ids[i]
             score = scores[i]
             
+            # Ensure within frame
+            xmin, ymin = max(0, xmin), max(0, ymin)
+            xmax, ymax = min(frame.shape[1], xmax), min(frame.shape[0], ymax)
+
+            if xmax <= xmin or ymax <= ymin:
+                continue
+            
             # Draw rectangle
-            cv2.rectangle(orig_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
             
             # Put text
             label = f"Class {class_id}: {score:.2f}"
-            cv2.putText(orig_img, label, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.putText(frame, label, (xmin, max(10, ymin - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
         # FPS and Display
         frame_count += 1
-        elapsed_time = time.time() - start_time
-        fps = frame_count / elapsed_time
-        cv2.putText(orig_img, f"FPS: {fps:.2f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        fps = 1.0 / (time.time() - start_time)
+        cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         
-        target_w = 1280
-        h, w = orig_img.shape[:2]
+        h, w = frame.shape[:2]
         if w > 0:
             scale = target_w / float(w)
-            display_frame = cv2.resize(orig_img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+            display_frame = cv2.resize(frame, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
         else:
-            display_frame = orig_img
+            display_frame = frame
             
         cv2.imshow("ONNX Inference", display_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -204,4 +214,8 @@ if __name__ == "__main__":
 
     cap.release()
     cv2.destroyAllWindows()
-    print(f"Total time elapsed: {time.time() - start_time:.2f}s for {frame_count} frames.")
+    print(f"Total time elapsed: {time.time() - start_total_time:.2f}s for {frame_count} frames.")
+    print(f"Average FPS: {frame_count / (time.time() - start_total_time):.1f}")
+
+if __name__ == "__main__":
+    main()

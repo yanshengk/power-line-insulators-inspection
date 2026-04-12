@@ -100,7 +100,7 @@ def calculate_shannon_entropy(probability):
     p = max(min(probability, 1.0 - 1e-7), 1e-7)
     return - (p * math.log2(p) + (1 - p) * math.log2(1 - p))
 
-def load_session(model_path):
+def load_session(model_path, trt_ep_context_file_path='./trt_engines'):
     sess_options = ort.SessionOptions()
     sess_options.intra_op_num_threads = 8
     sess_options.inter_op_num_threads = 8
@@ -111,19 +111,19 @@ def load_session(model_path):
             'trt_engine_cache_enable': True, 
             'trt_engine_cache_path': './trt_engines',
             'trt_dump_ep_context_model': True,
-            'trt_ep_context_file_path': './runs/detect'
+            'trt_ep_context_file_path': trt_ep_context_file_path
         }), 
         ('CUDAExecutionProvider', {}),
         ('CPUExecutionProvider', {})
     ])
     return session
 
-def get_input_info(session):
+def get_input_info(session, default_h=640, default_w=640):
     inputs = session.get_inputs()
     shape = inputs[0].shape
     h, w = shape[2], shape[3]
     if isinstance(h, str) or h is None:
-        h, w = 640, 640
+        h, w = default_h, default_w
     return inputs[0].name, h, w, inputs[0].type
 
 def get_output_name(session):
@@ -133,7 +133,7 @@ def preprocess(frame, input_height, input_width, input_type):
     img, ratio, pad = letterbox(frame, new_shape=(input_height, input_width))
     img = img[:, :, ::-1].transpose(2, 0, 1)
     img = np.ascontiguousarray(img)
-    dtype = np.float16 if '16' in input_type else np.float32
+    dtype = np.float16 if '16' in str(input_type) else np.float32
     img = img.astype(dtype) / 255.0
     img = np.expand_dims(img, axis=0)
     return img, ratio, pad
@@ -143,14 +143,15 @@ def main():
     
     model1_path = "runs/detect/train16/weights/train16_best.onnx"
     model2_path = "runs/detect/train17/weights/train17_best.onnx"
+    source_path = 'footage1_aigen.mp4'
     
     print(f"Loading Session 1: {model1_path}")
-    sess1 = load_session(model1_path)
+    sess1 = load_session(model1_path, trt_ep_context_file_path='./runs/detect/train16/weights')
     in1_name, in1_h, in1_w, in1_type = get_input_info(sess1)
     out1_name = get_output_name(sess1)
     
     print(f"Loading Session 2: {model2_path}")
-    sess2 = load_session(model2_path)
+    sess2 = load_session(model2_path, trt_ep_context_file_path='./runs/detect/train17/weights')
     in2_name, in2_h, in2_w, in2_type = get_input_info(sess2)
     out2_name = get_output_name(sess2)
     
@@ -158,15 +159,16 @@ def main():
     names2 = {0: 'flashed', 1: 'broken'}
     entropy_threshold = 0.3
     
-    source_path = 'footage1_aigen.mp4'
     print(f"Opening source: {source_path}")
-    
     cap = cv2.VideoCapture(source_path)
     if not cap.isOpened():
         print(f"Error opening source: {source_path}")
         return
         
     target_w = 1280
+    frame_count = 0
+    start_total_time = time.time()
+    
     while True:
         start_time = time.time()
         ret, frame = cap.read()
@@ -229,6 +231,7 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # FPS and Display
+        frame_count += 1
         fps = 1.0 / (time.time() - start_time)
         cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
@@ -245,6 +248,8 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    print(f"Total time elapsed: {time.time() - start_total_time:.2f}s for {frame_count} frames.")
+    print(f"Average FPS: {frame_count / (time.time() - start_total_time):.1f}")
 
 if __name__ == "__main__":
     main()
