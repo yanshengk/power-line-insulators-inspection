@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 import time
+import argparse
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=False, scaleFill=False, scaleup=True):
     # Resize and pad image while meeting stride-multiple constraints
@@ -106,8 +107,8 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
 
 def load_session(model_path, trt_ep_context_file_path='./trt_engines'):
     sess_options = ort.SessionOptions()
-    sess_options.intra_op_num_threads = 8
-    sess_options.inter_op_num_threads = 8
+    sess_options.intra_op_num_threads = 4
+    sess_options.inter_op_num_threads = 1
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=[
         ('TensorrtExecutionProvider', {
             'device_id': 0, 
@@ -133,6 +134,15 @@ def get_input_info(session, default_h=640, default_w=640):
 def get_output_name(session):
     return session.get_outputs()[0].name
 
+def run_with_iobinding(session, input_name, output_name, input_array):
+    """Run inference using IOBinding for reduced CPU-GPU memory transfer overhead."""
+    io_binding = session.io_binding()
+    input_ortvalue = ort.OrtValue.ortvalue_from_numpy(input_array, 'cuda', 0)
+    io_binding.bind_ortvalue_input(input_name, input_ortvalue)
+    io_binding.bind_output(output_name, 'cuda', 0)
+    session.run_with_iobinding(io_binding)
+    return [io_binding.get_outputs()[0].numpy()]
+
 def preprocess(frame, input_height, input_width, input_type):
     img, ratio, pad = letterbox(frame, new_shape=(input_height, input_width))
     img = img[:, :, ::-1].transpose(2, 0, 1)
@@ -143,10 +153,15 @@ def preprocess(frame, input_height, input_width, input_type):
     return img, ratio, pad
 
 def main():
+    parser = argparse.ArgumentParser(description='ONNX Inference')
+    parser.add_argument('--source', default='footage1_aigen.mp4', help='Video source path')
+    parser.add_argument('--headless', action='store_true', help='Skip display for pure inference benchmarking')
+    args = parser.parse_args()
+
     ort.set_default_logger_severity(3) # Only show errors, hide warnings
 
     model_path = "optimised_yolo11/final_training_run/weights/best.onnx"
-    video_path = "footage1_aigen.mp4"
+    video_path = args.source
     
     print(f"Loading Session: {model_path}")
     sess = load_session(model_path, trt_ep_context_file_path='./optimised_yolo11/final_training_run/weights')
@@ -161,6 +176,15 @@ def main():
         
     target_w = 1280
     frame_count = 0
+
+    # Warmup: first few TRT inferences can be slow due to kernel autotuning
+    print("Warming up TensorRT engines...")
+    dtype = np.float16 if '16' in str(in_type) else np.float32
+    dummy = np.zeros((1, 3, in_h, in_w), dtype=dtype)
+    for _ in range(5):
+        run_with_iobinding(sess, in_name, out_name, dummy)
+    print("Warmup complete.")
+
     start_total_time = time.time()
     
     while cap.isOpened():
@@ -171,49 +195,53 @@ def main():
             
         # Inference
         img, ratio, pad = preprocess(frame, in_h, in_w, in_type)
-        outputs = sess.run([out_name], {in_name: img})
+        outputs = run_with_iobinding(sess, in_name, out_name, img)
         
         # Postprocess
         boxes, scores, class_ids = postprocess(outputs, ratio, pad, conf_thres=0.3, iou_thres=0.45)
         
         # Draw bounding boxes
-        for i in range(len(boxes)):
-            xmin, ymin, xmax, ymax = map(int, boxes[i])
-            class_id = class_ids[i]
-            score = scores[i]
-            
-            # Ensure within frame
-            xmin, ymin = max(0, xmin), max(0, ymin)
-            xmax, ymax = min(frame.shape[1], xmax), min(frame.shape[0], ymax)
+        if not args.headless:
+            for i in range(len(boxes)):
+                xmin, ymin, xmax, ymax = map(int, boxes[i])
+                class_id = class_ids[i]
+                score = scores[i]
+                
+                # Ensure within frame
+                xmin, ymin = max(0, xmin), max(0, ymin)
+                xmax, ymax = min(frame.shape[1], xmax), min(frame.shape[0], ymax)
 
-            if xmax <= xmin or ymax <= ymin:
-                continue
-            
-            # Draw rectangle
-            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
-            
-            # Put text
-            label = f"Class {class_id}: {score:.2f}"
-            cv2.putText(frame, label, (xmin, max(10, ymin - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
+                if xmax <= xmin or ymax <= ymin:
+                    continue
+                
+                # Draw rectangle
+                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                
+                # Put text
+                label = f"Class {class_id}: {score:.2f}"
+                cv2.putText(frame, label, (xmin, max(10, ymin - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
         # FPS and Display
         frame_count += 1
         fps = 1.0 / (time.time() - start_time)
-        cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         
-        h, w = frame.shape[:2]
-        if w > 0:
-            scale = target_w / float(w)
-            display_frame = cv2.resize(frame, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            display_frame = frame
+        if not args.headless:
+            cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             
-        cv2.imshow("ONNX Inference", display_frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            h, w = frame.shape[:2]
+            if w > 0:
+                scale = target_w / float(w)
+                display_frame = cv2.resize(frame, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+            else:
+                display_frame = frame
+                
+            cv2.imshow("ONNX Inference", display_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
     cap.release()
-    cv2.destroyAllWindows()
+    if not args.headless:
+        cv2.destroyAllWindows()
     print(f"Total time elapsed: {time.time() - start_total_time:.2f}s for {frame_count} frames.")
     print(f"Average FPS: {frame_count / (time.time() - start_total_time):.1f}")
 

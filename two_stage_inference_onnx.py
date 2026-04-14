@@ -38,6 +38,9 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=False, scal
     return img, ratio, (dw, dh)
 
 def compute_iou(box, boxes):
+    # Compute IOU between box and boxes.
+    # box: [xmin, ymin, xmax, ymax]
+    # boxes: [N, 4]
     x1 = np.maximum(box[0], boxes[:, 0])
     y1 = np.maximum(box[1], boxes[:, 1])
     x2 = np.minimum(box[2], boxes[:, 2])
@@ -51,6 +54,7 @@ def compute_iou(box, boxes):
     return intersection_area / np.maximum(union_area, 1e-6)
 
 def nms(boxes, scores, iou_threshold):
+    # Sort by score
     sorted_indices = np.argsort(scores)[::-1]
     keep_boxes = []
     while sorted_indices.size > 0:
@@ -63,6 +67,7 @@ def nms(boxes, scores, iou_threshold):
     return keep_boxes
 
 def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
+    # YOLO output shape is typically [1, num_classes + 4, num_anchors]
     predictions = np.squeeze(output[0], axis=0) # [num_classes + 4, num_anchors]
     predictions = predictions.T # [num_anchors, num_classes + 4]
     
@@ -70,6 +75,7 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
     scores = np.max(predictions[:, 4:], axis=1)
     class_ids = np.argmax(predictions[:, 4:], axis=1)
     
+    # Filter by confidence
     mask = scores > conf_thres
     boxes = boxes[mask]
     scores = scores[mask]
@@ -78,20 +84,23 @@ def postprocess(output, ratio, pad, conf_thres=0.3, iou_thres=0.45):
     if len(boxes) == 0:
         return [], [], []
     
+    # Convert cx, cy, w, h to xmin, ymin, xmax, ymax
     boxes_xyxy = np.empty_like(boxes)
     boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
     boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
     boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
     boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
     
+    # Perform NMS
     keep_indices = nms(boxes_xyxy, scores, iou_thres)
     
     boxes_xyxy = boxes_xyxy[keep_indices]
     scores = scores[keep_indices]
     class_ids = class_ids[keep_indices]
     
-    boxes_xyxy[:, [0, 2]] -= pad[0]  
-    boxes_xyxy[:, [1, 3]] -= pad[1]  
+    # Scale boxes back to original image
+    boxes_xyxy[:, [0, 2]] -= pad[0]  # x padding
+    boxes_xyxy[:, [1, 3]] -= pad[1]  # y padding
     boxes_xyxy[:, [0, 2]] /= ratio[0]
     boxes_xyxy[:, [1, 3]] /= ratio[1]
     
@@ -154,7 +163,7 @@ def main():
     parser.add_argument('--headless', action='store_true', help='Skip display for pure inference benchmarking')
     args = parser.parse_args()
 
-    ort.set_default_logger_severity(3)
+    ort.set_default_logger_severity(3) # Only show errors, hide warnings
     
     model1_path = "runs/detect/train16/weights/train16_best.onnx"
     model2_path = "runs/detect/train17/weights/train17_best.onnx"
